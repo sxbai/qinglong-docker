@@ -1,4 +1,4 @@
-name: Build And Push Docker Image for Develop Branch
+name: Build And Push Docker Image for Develop Branch with Python 3.10
 
 on:
   schedule:
