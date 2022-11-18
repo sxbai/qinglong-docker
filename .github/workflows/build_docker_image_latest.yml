@@ -54,7 +54,6 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/qinglong
             ghcr.io/${{ github.repository_owner }}/qinglong
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}},value=${{ steps.latest_tag.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.latest_tag.outputs.tag }}
             type=semver,pattern={{major}},value=${{ steps.latest_tag.outputs.tag }}
