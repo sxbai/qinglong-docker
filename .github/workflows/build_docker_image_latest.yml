@@ -10,7 +10,44 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+
+    permissions:
+      packages: write
+      contents: read
+
+    outputs:
+      latest_tag: ${{ steps.latest_tag.outputs.tag }}
+      current_tag: ${{ steps.current_tag.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+
+      - name: Setup timezone
+        uses: zcong1993/setup-timezone@master
+        with:
+          timezone: Asia/Shanghai
+      
+      - name: Get latest tag
+        id: latest_tag
+        uses: jacobtomlinson/gha-get-docker-hub-tags@0.1.3
+        with:
+          org: 'whyour'  # Docker Hub user or organisation name
+          repo: 'qinglong'  # Docker Hub repository name
+
+      - name: Get current tag
+        id: current_tag
+        uses: jacobtomlinson/gha-get-docker-hub-tags@0.1.3
+        with:
+          org: 'masonlitong'  # Docker Hub user or organisation name
+          repo: 'qinglong'  # Docker Hub repository name
+      
   build:
+    if: ${{ needs.check-version.outputs.current_tag != needs.check-version.outputs.latest_tag }}
+    needs: [check-version]
+
     runs-on: ubuntu-latest
 
     permissions:
@@ -39,13 +76,6 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get latest tag
-        id: latest_tag
-        uses: jacobtomlinson/gha-get-docker-hub-tags@0.1.3
-        with:
-          org: 'whyour'  # Docker Hub user or organisation name
-          repo: 'qinglong'  # Docker Hub repository name
-
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v4
@@ -54,9 +84,9 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/qinglong
             ghcr.io/${{ github.repository_owner }}/qinglong
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.latest_tag.outputs.tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.latest_tag.outputs.tag }}
-            type=semver,pattern={{major}},value=${{ steps.latest_tag.outputs.tag }}
+            type=semver,pattern={{version}},value=${{ needs.check-version.outputs.latest_tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.check-version.outputs.latest_tag }}
+            type=semver,pattern={{major}},value=${{ needs.check-version.outputs.latest_tag }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -69,10 +99,91 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           build-args: |
-            QL_STATIC_BRANCH=v${{ steps.latest_tag.outputs.tag }}
+            QL_STATIC_BRANCH=v${{ needs.check-version.outputs.latest_tag }}
           network: host
           platforms: linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64
           context: docker/
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          
+  build-with-python310:
+    if: ${{ needs.check-version.outputs.current_tag != needs.check-version.outputs.latest_tag }}
+    needs: [check-version]
+    
+    runs-on: ubuntu-latest
+
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+
+      - name: Setup timezone
+        uses: zcong1993/setup-timezone@master
+        with:
+          timezone: Asia/Shanghai
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            ${{ secrets.DOCKER_USERNAME }}/qinglong
+            ghcr.io/${{ github.repository_owner }}/qinglong
+          flavor: |
+            latest=auto
+            suffix=-python3.10,onlatest=true
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.check-version.outputs.latest_tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.check-version.outputs.latest_tag }}
+            type=semver,pattern={{major}},value=${{ needs.check-version.outputs.latest_tag }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v3
+        with:
+          build-args: |
+            QL_STATIC_BRANCH=v${{ needs.check-version.outputs.latest_tag }}
+          network: host
+          platforms: linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64
+          context: docker/
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  update-version:
+    needs: [check-version]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          echo ${{ needs.check-version.outputs.latest_tag }} > VERSION
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add .
+          git commit -m ":bookmark: Update version"
+          git push
